@@ -9,7 +9,7 @@ echo "🚀 Desplegando infraestructura ECS para $PROJECT_NAME"
 # ============================================
 # 1. Obtener VPC y Subnets por defecto
 # ============================================
-echo "📍 Obteniendo información de red..."
+echo "Obteniendo información de red..."
 VPC_ID=$(aws ec2 describe-vpcs \
   --filters Name=is-default,Values=true \
   --query "Vpcs[0].VpcId" \
@@ -22,18 +22,23 @@ SUBNET_IDS=$(aws ec2 describe-subnets \
   --output text \
   --region $REGION | tr '\t' ',')
 
-echo "✅ VPC: $VPC_ID"
-echo "✅ Subnets: $SUBNET_IDS"
+echo "VPC: $VPC_ID"
+echo "Subnets: $SUBNET_IDS"
 
 # ============================================
 # 2. Desplegar RDS (si no existe)
 # ============================================
-echo "📦 Verificando base de datos..."
-if ! aws cloudformation describe-stacks \
-  --stack-name ${PROJECT_NAME}-rds \
-  --region $REGION &>/dev/null; then
+echo " Verificando base de datos..."
+if ! aws cloudformation describe-stacks --stack-name ${PROJECT_NAME}-rds --region $REGION &>/dev/null; then
+
+  echo "Creando base de datos RDS..."
   
-  echo "🔨 Creando base de datos RDS..."
+  # Convertir SubnetIds en formato compatible con List<AWS::EC2::Subnet::Id>
+  SUBNETS_OVERRIDE=""
+  for subnet in ${SUBNET_IDS//,/ }; do
+    SUBNETS_OVERRIDE+="SubnetIds=$subnet "
+  done
+
   aws cloudformation deploy \
     --stack-name ${PROJECT_NAME}-rds \
     --template-file infra/cloudformation/rds-micro.yml \
@@ -43,8 +48,10 @@ if ! aws cloudformation describe-stacks \
       DBUser=postgres \
       DBPassword=festivos2024 \
       VpcId=$VPC_ID \
+      $SUBNETS_OVERRIDE \
+    --capabilities CAPABILITY_NAMED_IAM \
     --region $REGION
-  
+
   echo "⏳ Esperando RDS (esto puede tomar 5-10 minutos)..."
   aws cloudformation wait stack-create-complete \
     --stack-name ${PROJECT_NAME}-rds \
@@ -56,8 +63,6 @@ DB_ENDPOINT=$(aws cloudformation describe-stacks \
   --query "Stacks[0].Outputs[?OutputKey=='DBEndpointAddress'].OutputValue" \
   --output text \
   --region $REGION)
-
-echo "✅ Base de datos lista: $DB_ENDPOINT"
 
 # ============================================
 # 3. Desplegar ECS
