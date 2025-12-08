@@ -20,7 +20,7 @@ SUBNET_IDS=$(aws ec2 describe-subnets \
   --filters Name=vpc-id,Values=$VPC_ID \
   --query "Subnets[*].SubnetId" \
   --output text \
-  --region $REGION | tr '\t' ',')
+  --region $REGION | tr ' ' ',')
 
 echo "✅ VPC: $VPC_ID"
 echo "✅ Subnets: $SUBNET_IDS"
