@@ -12,8 +12,8 @@ Parameters:
     Type: AWS::EC2::VPC::Id
     Description: VPC donde desplegar (usar VPC por defecto)
   SubnetIds:
-    Type: List<AWS::EC2::Subnet::Id>
-    Description: Subnets públicas (al menos 2)
+    Type: CommaDelimitedList
+    Description: Lista de Subnet IDs separados por comas
   DBEndpoint:
     Type: String
     Description: Endpoint de la base de datos RDS

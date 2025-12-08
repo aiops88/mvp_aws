@@ -2,11 +2,6 @@
 
 echo "🧹 Limpiando archivos obsoletos..."
 
-# Crear backup por si acaso
-echo "📦 Creando backup..."
-mkdir -p backup-$(date +%Y%m%d)
-cp -r infra templates .github CI Dockerfile deploy-mvp.sh backup-$(date +%Y%m%d)/ 2>/dev/null || true
-
 # Eliminar archivos obsoletos
 echo "🗑️  Eliminando archivos..."
 
@@ -22,20 +17,15 @@ rm -rf templates/
 
 # Scripts obsoletos
 rm -f deploy-mvp.sh
-rm -f CI/buildspec.yml
 rm -rf CI/
 
 # GitHub Actions antiguo
 rm -f .github/workflows/deploy.yml
 
-# Dockerfile raíz (duplicado)
+# Dockerfile raíz DUPLICADO (el bueno está en apiFestivos/)
 rm -f Dockerfile
 
-echo "✅ Limpieza completada"
-echo ""
-echo "📂 Estructura final:"
-tree -L 2 -I 'target|node_modules|backup*'
+# Carpeta src vacía
+rm -rf apiFestivos/src/
 
-echo ""
-echo "⚠️  IMPORTANTE: Los backups están en backup-$(date +%Y%m%d)/"
-echo "   Si todo funciona bien, puedes eliminarlos después."
+echo "✅ Limpieza completada"

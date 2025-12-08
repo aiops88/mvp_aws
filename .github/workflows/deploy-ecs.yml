@@ -1,85 +1,142 @@
-name: Deploy to ECS Fargate
+#!/bin/bash
+set -e
 
-on:
-  push:
-    branches:
-      - main
+PROJECT_NAME="festivos-api"
+REGION="us-east-1"
 
-env:
-  AWS_REGION: us-east-1
-  PROJECT_NAME: festivos-api
+echo "🚀 Desplegando infraestructura ECS para $PROJECT_NAME"
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout código
-        uses: actions/checkout@v4
+# ============================================
+# 1. Obtener VPC y Subnets por defecto
+# ============================================
+echo "📍 Obteniendo información de red..."
+VPC_ID=$(aws ec2 describe-vpcs \
+  --filters Name=is-default,Values=true \
+  --query "Vpcs[0].VpcId" \
+  --output text \
+  --region $REGION)
 
-      - name: Configurar AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+SUBNET_IDS=$(aws ec2 describe-subnets \
+  --filters Name=vpc-id,Values=$VPC_ID \
+  --query "Subnets[*].SubnetId" \
+  --output text \
+  --region $REGION | tr '\t' ',')
 
-      - name: Login a Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+echo "✅ VPC: $VPC_ID"
+echo "✅ Subnets: $SUBNET_IDS"
 
-      - name: Obtener URI de ECR
-        id: ecr-uri
-        run: |
-          ECR_URI=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.PROJECT_NAME }}-ecs \
-            --query "Stacks[0].Outputs[?OutputKey=='ECRRepositoryUri'].OutputValue" \
-            --output text)
-          echo "uri=$ECR_URI" >> $GITHUB_OUTPUT
+# ============================================
+# 2. Desplegar RDS (si no existe)
+# ============================================
+echo "📦 Verificando base de datos..."
+if ! aws cloudformation describe-stacks \
+  --stack-name ${PROJECT_NAME}-rds \
+  --region $REGION &>/dev/null; then
+  
+  echo "🔨 Creando base de datos RDS..."
+  aws cloudformation deploy \
+    --stack-name ${PROJECT_NAME}-rds \
+    --template-file infra/cloudformation/rds-micro.yml \
+    --parameter-overrides \
+      DBInstanceIdentifier=${PROJECT_NAME}-db \
+      DBName=festivos \
+      DBUser=postgres \
+      DBPassword=festivos2024 \
+      VpcId=$VPC_ID \
+      SubnetIds="$SUBNET_IDS" \
+    --region $REGION
+  
+  echo "⏳ Esperando RDS (esto puede tomar 5-10 minutos)..."
+  aws cloudformation wait stack-create-complete \
+    --stack-name ${PROJECT_NAME}-rds \
+    --region $REGION
+fi
 
-      - name: Build, tag y push imagen
-        env:
-          ECR_URI: ${{ steps.ecr-uri.outputs.uri }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          cd apiFestivos
-          docker build -t $ECR_URI:$IMAGE_TAG .
-          docker tag $ECR_URI:$IMAGE_TAG $ECR_URI:latest
-          docker push $ECR_URI:$IMAGE_TAG
-          docker push $ECR_URI:latest
-          echo "image_uri=$ECR_URI:$IMAGE_TAG" >> $GITHUB_OUTPUT
+DB_ENDPOINT=$(aws cloudformation describe-stacks \
+  --stack-name ${PROJECT_NAME}-rds \
+  --query "Stacks[0].Outputs[?OutputKey=='DBEndpointAddress'].OutputValue" \
+  --output text \
+  --region $REGION)
 
-      - name: Actualizar ECS Service
-        run: |
-          CLUSTER_NAME=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.PROJECT_NAME }}-ecs \
-            --query "Stacks[0].Outputs[?OutputKey=='ECSClusterName'].OutputValue" \
-            --output text)
-          
-          SERVICE_NAME=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.PROJECT_NAME }}-ecs \
-            --query "Stacks[0].Outputs[?OutputKey=='ECSServiceName'].OutputValue" \
-            --output text)
-          
-          aws ecs update-service \
-            --cluster $CLUSTER_NAME \
-            --service $SERVICE_NAME \
-            --force-new-deployment
-          
-          echo "✅ Servicio actualizado: $SERVICE_NAME en $CLUSTER_NAME"
+echo "✅ Base de datos lista: $DB_ENDPOINT"
 
-      - name: Esperar despliegue
-        run: |
-          CLUSTER_NAME=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.PROJECT_NAME }}-ecs \
-            --query "Stacks[0].Outputs[?OutputKey=='ECSClusterName'].OutputValue" \
-            --output text)
-          
-          SERVICE_NAME=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.PROJECT_NAME }}-ecs \
-            --query "Stacks[0].Outputs[?OutputKey=='ECSServiceName'].OutputValue" \
-            --output text)
-          
-          aws ecs wait services-stable \
-            --cluster $CLUSTER_NAME \
-            --services $SERVICE_NAME
+# ============================================
+# 3. Desplegar ECS
+# ============================================
+echo "🐳 Desplegando infraestructura ECS..."
+aws cloudformation deploy \
+  --stack-name ${PROJECT_NAME}-ecs \
+  --template-file infra/cloudformation/infra-ecs-simplified.yml \
+  --parameter-overrides \
+    ProjectName=$PROJECT_NAME \
+    VPCId=$VPC_ID \
+    SubnetIds="$SUBNET_IDS" \
+    DBEndpoint=$DB_ENDPOINT \
+    DBName=festivos \
+    DBUser=postgres \
+    DBPassword=festivos2024 \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region $REGION
+
+echo "⏳ Esperando ECS..."
+aws cloudformation wait stack-create-complete \
+  --stack-name ${PROJECT_NAME}-ecs \
+  --region $REGION
+
+# ============================================
+# 4. Build y Push de imagen Docker
+# ============================================
+echo "🔨 Construyendo imagen Docker..."
+ECR_URI=$(aws cloudformation describe-stacks \
+  --stack-name ${PROJECT_NAME}-ecs \
+  --query "Stacks[0].Outputs[?OutputKey=='ECRRepositoryUri'].OutputValue" \
+  --output text \
+  --region $REGION)
+
+echo "📦 ECR URI: $ECR_URI"
+
+# Login a ECR
+aws ecr get-login-password --region $REGION | \
+  docker login --username AWS --password-stdin ${ECR_URI%%/*}
+
+# Build
+docker build -t $PROJECT_NAME:latest -f apiFestivos/Dockerfile apiFestivos/
+
+# Tag y Push
+docker tag $PROJECT_NAME:latest $ECR_URI:latest
+docker push $ECR_URI:latest
+
+echo "✅ Imagen subida: $ECR_URI:latest"
+
+# ============================================
+# 5. Forzar nuevo despliegue del servicio
+# ============================================
+echo "🔄 Actualizando servicio ECS..."
+CLUSTER_NAME=$(aws cloudformation describe-stacks \
+  --stack-name ${PROJECT_NAME}-ecs \
+  --query "Stacks[0].Outputs[?OutputKey=='ECSClusterName'].OutputValue" \
+  --output text \
+  --region $REGION)
+
+SERVICE_NAME=$(aws cloudformation describe-stacks \
+  --stack-name ${PROJECT_NAME}-ecs \
+  --query "Stacks[0].Outputs[?OutputKey=='ECSServiceName'].OutputValue" \
+  --output text \
+  --region $REGION)
+
+aws ecs update-service \
+  --cluster $CLUSTER_NAME \
+  --service $SERVICE_NAME \
+  --force-new-deployment \
+  --region $REGION
+
+echo ""
+echo "✅ ¡Despliegue completado!"
+echo ""
+echo "📊 Para ver logs:"
+echo "   aws logs tail /ecs/$PROJECT_NAME --follow --region $REGION"
+echo ""
+echo "🔍 Para obtener IP pública de la tarea:"
+echo "   aws ecs list-tasks --cluster $CLUSTER_NAME --service $SERVICE_NAME --region $REGION"
+echo ""
+echo "💰 Costo estimado: ~\$15-20/mes (ECS Fargate + RDS)"
