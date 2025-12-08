@@ -1,0 +1,84 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: IAM roles y políticas para Proyecto Festivos
+
+Parameters:
+  ProjectName:
+    Type: String
+  GitHubConnectionArn:
+    Type: String
+  AWSRegion:
+    Type: String
+
+Resources:
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-pipeline-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PipelinePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codeconnections:UseConnection
+                  - codestar-connections:UseConnection
+                Resource: !Ref GitHubConnectionArn
+              - Effect: Allow
+                Action:
+                  - cloudformation:*
+                  - ecs:*
+                  - ecr:*
+                  - ec2:*
+                  - iam:PassRole
+                  - codebuild:*
+                  - s3:*
+                  - logs:*
+                Resource: "*"
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-build-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: BuildPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchGetImage
+                  - ecr:CompleteLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:*
+                  - logs:*
+                  - s3:*
+                  - ecs:*
+                  - codebuild:*
+                  - cloudformation:*                  
+                Resource: "*"
+
+Outputs:
+  CodePipelineRoleArn:
+    Value: !GetAtt CodePipelineRole.Arn
+  CodeBuildRoleArn:
+    Value: !GetAtt CodeBuildRole.Arn
+    Export:
+        Name: !Sub "${ProjectName}-build-role-arn"

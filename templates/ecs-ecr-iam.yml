@@ -1,0 +1,190 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ECR repos, ECS Cluster, IAM roles, CloudWatch LogGroups y ECS Services (EC2 launch type) para UdeABootCamp
+
+#Parameters:
+  #BackendImage:
+    #Type: String
+    #Description: URI de la imagen backend en ECR
+  #FrontendImage:
+    #Type: String
+    #Description: URI de la imagen frontend en ECR
+  #EC2SecurityGroup:
+    #Type: String
+    #Description: ID del Security Group para tareas ECS EC2
+  #EC2Subnets:
+    #Type: List<AWS::EC2::Subnet::Id>
+    #Description: Subnets donde desplegar las tareas ECS EC2
+
+Resources:
+
+  # ECR repositories
+  UdeABootCampECRBackend:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: udeabootcamp-backend
+      LifecyclePolicy:
+        LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"keep last 10 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},"action":{"type":"expire"}}]}'
+      Tags:
+        - Key: Name
+          Value: udeabootcamp-backend
+
+  UdeABootCampECRFrontend:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: udeabootcamp-frontend
+      LifecyclePolicy:
+        LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"keep last 10 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},"action":{"type":"expire"}}]}'
+      Tags:
+        - Key: Name
+          Value: udeabootcamp-frontend
+
+  # ECS Cluster
+  UdeABootCampECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: UdeABootCamp-Cluster
+      Tags:
+        - Key: Name
+          Value: UdeABootCamp-Cluster
+
+  # IAM Role: ECS Task Execution Role
+  UdeABootCampECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: UdeABootCamp-ecs-execution-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Path: /
+
+  # IAM Role: ECS Task Role
+  UdeABootCampECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: UdeABootCamp-ecs-task-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns: []
+      Path: /
+
+  # CloudWatch Log Groups
+  UdeABootCampLogGroupBackend:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/udeabootcamp-backend
+      RetentionInDays: 14
+
+  UdeABootCampLogGroupFrontend:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/udeabootcamp-frontend
+      RetentionInDays: 14
+
+  # ECS Task Definition - Backend (EC2)
+  UdeABootCampBackendTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: udeabootcamp-backend-task
+      RequiresCompatibilities:
+        - EC2
+      NetworkMode: bridge
+      Cpu: '256'
+      Memory: '512'
+      ExecutionRoleArn: !GetAtt UdeABootCampECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt UdeABootCampECSTaskRole.Arn
+      ContainerDefinitions:
+        - Name: udeabootcamp-backend
+          Image: !GetAtt UdeABootCampECRBackend.RepositoryUri
+          PortMappings:
+            - ContainerPort: 80
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/udeabootcamp-backend
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+
+  # ECS Task Definition - Frontend (EC2)
+  UdeABootCampFrontendTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: udeabootcamp-frontend-task
+      RequiresCompatibilities:
+        - EC2
+      NetworkMode: bridge
+      Cpu: '256'
+      Memory: '512'
+      ExecutionRoleArn: !GetAtt UdeABootCampECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt UdeABootCampECSTaskRole.Arn
+      ContainerDefinitions:
+        - Name: udeabootcamp-frontend
+          Image: !GetAtt UdeABootCampECRFrontend.RepositoryUri
+          PortMappings:
+            - ContainerPort: 80
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/udeabootcamp-frontend
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+
+  # ECS Service - Backend (EC2)
+  UdeABootCampBackendService:
+    Type: AWS::ECS::Service
+    DependsOn:
+        - UdeABootCampECSCluster
+        - UdeABootCampBackendTaskDefinition
+    Properties:
+        ServiceName: udeabootcamp-backend-service
+        Cluster: !Ref UdeABootCampECSCluster
+        DesiredCount: 0
+        LaunchType: EC2
+        TaskDefinition: !Ref UdeABootCampBackendTaskDefinition
+
+  UdeABootCampFrontendService:
+    Type: AWS::ECS::Service
+    DependsOn:
+     - UdeABootCampECSCluster
+     - UdeABootCampFrontendTaskDefinition
+    Properties:
+        ServiceName: udeabootcamp-frontend-service
+        Cluster: !Ref UdeABootCampECSCluster      
+        DesiredCount: 0
+        LaunchType: EC2
+        TaskDefinition: !Ref UdeABootCampFrontendTaskDefinition
+
+Outputs:
+  BackendRepositoryUri:
+    Description: URI del repositorio ECR backend
+    Value: !GetAtt UdeABootCampECRBackend.RepositoryUri
+
+  FrontendRepositoryUri:
+    Description: URI del repositorio ECR frontend
+    Value: !GetAtt UdeABootCampECRFrontend.RepositoryUri
+
+  ECSClusterName:
+    Description: Nombre del cluster ECS creado
+    Value: !Ref UdeABootCampECSCluster
+
+  ECSTaskExecutionRoleArn:
+    Description: ARN del role de ejecución ECS
+    Value: !GetAtt UdeABootCampECSTaskExecutionRole.Arn
+
+  ECSTaskRoleArn:
+    Description: ARN del task role para containers
+    Value: !GetAtt UdeABootCampECSTaskRole.Arn

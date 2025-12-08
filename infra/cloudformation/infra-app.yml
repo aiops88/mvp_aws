@@ -1,0 +1,199 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  ECR repositories, ECS Cluster (EC2 launch), IAM roles, Launch Configuration and AutoScalingGroup
+  for ProyectoFestivos. Instances will join the ECS cluster via UserData.
+
+Parameters:
+  ProjectName:
+    Type: String
+  ClusterName:
+    Type: String
+  ECRRepoBackend:
+    Type: String
+  ECRRepoFrontend:
+    Type: String
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    Description: EC2 instance type for ECS instances
+  KeyName:
+    Type: String
+    Default: ""
+    Description: Optional EC2 KeyPair name for SSH (leave empty to omit)
+  AmiSSMParameter:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+    Description: SSM parameter path for AMI ID
+  ServiceName:
+    Type: String
+  AWSRegion:
+    Type: String
+
+Resources:
+  # ECR repos
+  ECRBackend:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref ECRRepoBackend
+      LifecyclePolicy:
+        LifecyclePolicyText:
+          Fn::Sub: |
+            {
+              "rules": [
+                {"rulePriority": 1, "description": "Keep last 10 images", "selection": {"tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 10}, "action": {"type": "expire"}}
+              ]
+            }
+
+  ECRFrontend:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref ECRRepoFrontend
+      LifecyclePolicy:
+        LifecyclePolicyText:
+          Fn::Sub: |
+            {
+              "rules": [
+                {"rulePriority": 1, "description": "Keep last 10 images", "selection": {"tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 10}, "action": {"type": "expire"}}
+              ]
+            }
+
+  # ECS Cluster
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref ClusterName
+      
+    # ECS Service - Backend (EC2)
+  ECSBackendService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ECSBackendTaskDefinition
+    Properties:
+      ServiceName: !Ref ServiceName
+      Cluster: !Ref ECSCluster
+      DesiredCount: 1
+      LaunchType: FARGATE
+      TaskDefinition: !Ref ECSBackendTaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !ImportValue 
+                'Fn::Sub': "${ProjectName}-sg"
+          Subnets:
+            - !ImportValue 
+                'Fn::Sub': "${ProjectName}-public-1"
+            - !ImportValue 
+                'Fn::Sub': "${ProjectName}-public-2"
+     
+        
+ECSBackendTaskDefinition:
+  Type: AWS::ECS::TaskDefinition
+  Properties:
+    Family: !Sub "${ProjectName}-backend-task-definition"
+    RequiresCompatibilities:
+      - FARGATE
+    NetworkMode: awsvpc
+    Cpu: '512'
+    Memory: '1024'
+    ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+    TaskRoleArn: !GetAtt ECSTaskRole.Arn
+    ContainerDefinitions:
+      - Name: !Sub "${ProjectName}-backend-container"
+        Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWSRegion}.amazonaws.com/${ECRRepoBackend}:latest"
+        PortMappings:
+          - ContainerPort: 8080
+        Environment:
+          - Name: SPRING_PROFILES_ACTIVE
+            Value: production
+          - Name: SPRING_DATASOURCE_URL
+            Value: "jdbc:postgresql://localhost:5432/festivos"  # TEMPORAL - hasta RDS
+          - Name: SPRING_DATASOURCE_USERNAME
+            Value: postgres
+          - Name: SPRING_DATASOURCE_PASSWORD
+            Value: sa
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref ECSLogGroupBackend
+            awslogs-region: !Ref AWSRegion
+            awslogs-stream-prefix: ecs
+        HealthCheck:
+          Command:
+            - "CMD-SHELL"
+            - "curl -f http://localhost:8080/actuator/health || exit 1"
+          Interval: 30
+          Timeout: 5
+          Retries: 3
+          StartPeriod: 60
+  
+  # IAM Role: ECS Task Execution Role
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-ecs-execution-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+  
+    # IAM Role: ECS Task Role
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-ecs-task-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      
+
+  # IAM Role for ECS instances
+  ECSInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  ECSInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref ECSInstanceRole
+      Path: /
+          
+  ECSLogGroupBackend:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/festivos-backend
+      RetentionInDays: 7
+      
+Outputs:
+  ECRBackendUri:
+    Description: ECR repository URI for backend
+    Value: !GetAtt [ECRBackend, RepositoryUri]
+  ECRFrontendUri:
+    Description: ECR repository URI for frontend
+    Value: !GetAtt [ECRFrontend, RepositoryUri]
+  ECSClusterName:
+    Description: ECS cluster name
+    Value: !Ref ECSCluster

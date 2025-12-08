@@ -1,0 +1,4 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Infraestructura de aplicación enlazada a VPC existente
+
+Resources:

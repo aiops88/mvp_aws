@@ -1,0 +1,40 @@
+# NUEVO: monitoring.yml
+Resources:
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${ProjectName}-dashboard"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["AWS/ECS", "CPUUtilization", "ServiceName", "${ServiceName}"],
+                  ["AWS/ECS", "MemoryUtilization", "ServiceName", "${ServiceName}"],
+                  ["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "${ALB}"]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "us-east-1",
+                "title": "API Festivos - Métricas Principales"
+              }
+            }
+          ]
+        }
+        
+  HighCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-high-cpu"
+      AlarmDescription: "CPU utilization too high"
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref SNSTopic

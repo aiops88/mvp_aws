@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  ECR repositories, ECS Cluster (EC2 launch), IAM roles, Launch Configuration and AutoScalingGroup
+  for ProyectoFestivos. Instances will join the ECS cluster via UserData.
+
+Parameters:
+  ProjectName:
+    Type: String
+  Environment:
+    Type: String
+    Default: staging
+  ECRRepoBackend:
+    Type: String
+  ECRRepoFrontend:
+    Type: String
+
+Resources:
+  # ECR repos
+  ECRBackend:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref ECRRepoBackend
+      LifecyclePolicy:
+        LifecyclePolicyText:
+          Fn::Sub: |
+            {
+              "rules": [
+                {"rulePriority": 1, "description": "Keep last 10 images", "selection": {"tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 10}, "action": {"type": "expire"}}
+              ]
+            }
+
+  ECRFrontend:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref ECRRepoFrontend
+      LifecyclePolicy:
+        LifecyclePolicyText:
+          Fn::Sub: |
+            {
+              "rules": [
+                {"rulePriority": 1, "description": "Keep last 10 images", "selection": {"tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 10}, "action": {"type": "expire"}}
+              ]
+            }
+
+Outputs:
+  ECRBackendUri:
+    Description: ECR repository URI for backend
+    Value: !GetAtt [ECRBackend, RepositoryUri]
+    Export:
+        Name: !Sub "${ProjectName}-ecr-backend-uri"
+    
+  ECRFrontendUri:
+    Description: ECR repository URI for frontend
+    Value: !GetAtt [ECRFrontend, RepositoryUri]

@@ -1,0 +1,191 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CodePipeline para Proyecto Festivos con integración GitHub (CodeConnections)
+
+Parameters:
+  ProjectName:
+    Type: String 
+  GitHubConnectionArn:
+    Type: String
+    Description: ARN de la conexión de CodeConnections con GitHub
+  GitHubRepository:
+    Type: String
+    Default: racso534/UdeA_Api_Festivos
+    Description: Nombre del repositorio en GitHub (usuario/repo)
+  GitHubBranch:
+    Type: String
+    Default: main
+    Description: Rama a usar Main de GitHub
+  ClusterName:
+    Type: String
+    Default: proyectofestivos-cluster
+  ServiceName:
+    Type: String
+    Default: proyectofestivos-backend
+
+Resources:
+  PipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: CodePipelinePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:*
+                  - codebuild:*
+                  - codedeploy:*
+                  - cloudformation:*
+                  - iam:PassRole
+                  - ecs:*
+                  - ecr:*
+                  - codestar-connections:UseConnection
+                  - codestar-connections:GetConnection
+                Resource:
+                  - "*"
+                  - !Ref GitHubConnectionArn
+        - PolicyName: AllowCodeConnections
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codeconnections:UseConnection
+                Resource: !Ref GitHubConnectionArn
+
+
+  ProjectFestivosPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: proyectofestivos-pipeline
+      RoleArn: !GetAtt PipelineRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref PipelineBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceFromGitHub
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: '1'
+              Configuration:
+                ConnectionArn: !Ref GitHubConnectionArn
+                FullRepositoryId: !Ref GitHubRepository
+                BranchName: !Ref GitHubBranch
+              OutputArtifacts:
+                - Name: SourceOutput
+              RunOrder: 1
+
+        - Name: Build
+          Actions:
+            - Name: BuildContainer
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref BuildProject
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 1
+
+        - Name: Deploy
+          Actions:
+            - Name: DeployToECS
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: ECS
+                Version: '1'
+              Configuration:
+                ClusterName: !Ref ClusterName
+                ServiceName: !Ref ServiceName
+                FileName: imagedefinitions.json
+              InputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 1
+
+  PipelineBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: proyectofestivos-build
+      ServiceRole: !ImportValue 
+                       Fn::Sub: "${ProjectName}-build-role-arn"
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+        PrivilegedMode: true
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: buildspec.yml
+
+  BuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: CodeBuildPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:PutImage
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetProjects
+                  - ecs:DescribeServices
+                  - ecs:UpdateService
+                Resource: "*"
+
+Outputs:
+  PipelineName:
+    Description: Nombre del pipeline creado
+    Value: !Ref ProjectFestivosPipeline
+  PipelineUrl:
+    Description: URL del pipeline en la consola
+    Value: !Sub https://console.aws.amazon.com/codepipeline/home?region=${AWS::Region}#/view/${ProjectFestivosPipeline}

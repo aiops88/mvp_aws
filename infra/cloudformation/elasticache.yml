@@ -1,0 +1,21 @@
+Resources:
+  CacheSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: Subnet group for ElastiCache
+      SubnetIds:
+        - !ImportValue "ProyectoFestivos-private-1"
+        - !ImportValue "ProyectoFestivos-private-2"
+        
+  RedisCluster:
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      ReplicationGroupDescription: Redis para cache
+      NumCacheClusters: 2
+      Engine: redis
+      CacheNodeType: cache.t3.micro
+      CacheSubnetGroupName: !Ref CacheSubnetGroup
+      SecurityGroupIds:
+        - !Ref CacheSecurityGroup
+      AutomaticFailoverEnabled: true
+      MultiAZEnabled: true
