@@ -1,19 +1,29 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: AWS CloudFormation Template for AWS App Runner Service (Free Tier Eligible).
+Description: AWS CloudFormation Template for AWS App Runner Service (Free Tier Eligible) and ECR Repository.
 
 Parameters:
   AppRunnerServiceName:
     Type: String
+    Default: mvp-app-runner
     Description: The name of the App Runner service.
-  ECRRepositoryArn:
+  ECRRepositoryName:
     Type: String
-    Description: ARN of the ECR repository containing the application image.
-  ECRImageTag:
-    Type: String
-    Default: latest
-    Description: Tag of the image in the ECR repository.
+    Default: mvp-app-repo
+    Description: The name of the ECR repository.
 
 Resources:
+  # 1. ECR Repository (Created by this stack)
+  AppRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref ECRRepositoryName
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      Tags:
+        - Key: Name
+          Value: !Ref ECRRepositoryName
+
+  # 2. IAM Role for App Runner to pull images from ECR
   AppRunnerServiceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -26,7 +36,11 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+      Tags:
+        - Key: Name
+          Value: !Sub "${AppRunnerServiceName}-role"
 
+  # 3. App Runner Service
   AppRunnerService:
     Type: AWS::AppRunner::Service
     Properties:
@@ -35,28 +49,26 @@ Resources:
         AuthenticationConfiguration:
           AccessRoleArn: !GetAtt AppRunnerServiceRole.Arn
         ImageRepository:
-          ImageIdentifier: !Sub "${ECRRepositoryArn}:${ECRImageTag}"
+          ImageIdentifier: !Sub "${AppRepository.RepositoryUri}:latest" # Use the ECR created above
           ImageRepositoryType: ECR
       InstanceConfiguration:
-        Cpu: 1024 # 1 vCPU (Free Tier eligible)
-        Memory: 2048 # 2 GB (Free Tier eligible)
+        Cpu: "1024" # 1 vCPU (Free Tier Eligible)
+        Memory: "2048" # 2 GB (Free Tier Eligible)
       HealthCheckConfiguration:
-        Protocol: TCP
-        Path: /
-        Interval: 5
+        Path: "/" # Assuming the app has a root endpoint
+        Protocol: HTTP
+        Interval: 10
         Timeout: 5
         HealthyThreshold: 1
         UnhealthyThreshold: 5
-      AutoScalingConfigurationSource: "FULL"
-      AutoScalingConfiguration:
-        MaxConcurrency: 100
-        MinSize: 1 # Mantener 1 instancia para evitar el cold start (Free Tier cubre 1 instancia)
-        MaxSize: 1
+      Tags:
+        - Key: Name
+          Value: !Ref AppRunnerServiceName
 
 Outputs:
   AppRunnerServiceUrl:
     Description: The URL of the App Runner service
     Value: !GetAtt AppRunnerService.ServiceUrl
-  AppRunnerServiceArn:
-    Description: The ARN of the App Runner service
-    Value: !Ref AppRunnerService
+  ECRRepositoryUri:
+    Description: The URI of the ECR Repository
+    Value: !GetAtt AppRepository.RepositoryUri
