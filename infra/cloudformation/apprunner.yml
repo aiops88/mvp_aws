@@ -1,0 +1,62 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AWS CloudFormation Template for AWS App Runner Service (Free Tier Eligible).
+
+Parameters:
+  AppRunnerServiceName:
+    Type: String
+    Description: The name of the App Runner service.
+  ECRRepositoryArn:
+    Type: String
+    Description: ARN of the ECR repository containing the application image.
+  ECRImageTag:
+    Type: String
+    Default: latest
+    Description: Tag of the image in the ECR repository.
+
+Resources:
+  AppRunnerServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: tasks.apprunner.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+
+  AppRunnerService:
+    Type: AWS::AppRunner::Service
+    Properties:
+      ServiceName: !Ref AppRunnerServiceName
+      SourceConfiguration:
+        AuthenticationConfiguration:
+          AccessRoleArn: !GetAtt AppRunnerServiceRole.Arn
+        ImageRepository:
+          ImageIdentifier: !Sub "${ECRRepositoryArn}:${ECRImageTag}"
+          ImageRepositoryType: ECR
+      InstanceConfiguration:
+        Cpu: 1024 # 1 vCPU (Free Tier eligible)
+        Memory: 2048 # 2 GB (Free Tier eligible)
+      HealthCheckConfiguration:
+        Protocol: TCP
+        Path: /
+        Interval: 5
+        Timeout: 5
+        HealthyThreshold: 1
+        UnhealthyThreshold: 5
+      AutoScalingConfigurationSource: "FULL"
+      AutoScalingConfiguration:
+        MaxConcurrency: 100
+        MinSize: 1 # Mantener 1 instancia para evitar el cold start (Free Tier cubre 1 instancia)
+        MaxSize: 1
+
+Outputs:
+  AppRunnerServiceUrl:
+    Description: The URL of the App Runner service
+    Value: !GetAtt AppRunnerService.ServiceUrl
+  AppRunnerServiceArn:
+    Description: The ARN of the App Runner service
+    Value: !Ref AppRunnerService

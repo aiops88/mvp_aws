@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AWS CloudFormation Template for a Free Tier eligible RDS PostgreSQL Instance.
+
+Parameters:
+  DBInstanceIdentifier:
+    Type: String
+    Default: mvp-db-instance
+    Description: The database instance identifier.
+  DBName:
+    Type: String
+    Default: mvpdb
+    Description: The name of the database to create.
+  DBUser:
+    Type: String
+    Default: mvpuser
+    Description: The master username for the database.
+  DBPassword:
+    Type: String
+    NoEcho: true
+    Description: The master password for the database.
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: The VPC ID where the RDS instance will be launched. (Use the default VPC ID)
+
+Resources:
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for RDS instance
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432 # Default PostgreSQL port
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0 # WARNING: For MVP testing only. Restrict this in production!
+
+  RDSDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS instance
+      SubnetIds:
+        # Busca las subnets de la VPC por defecto. Esto es un placeholder,
+        # en un entorno real deberías obtenerlas dinámicamente o pasarlas como parámetro.
+        # Asumiremos que la VPC por defecto tiene subnets.
+        - !Select [0, !GetAtt VpcId, Subnets]
+        - !Select [1, !GetAtt VpcId, Subnets]
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Ref DBInstanceIdentifier
+      DBName: !Ref DBName
+      Engine: postgres
+      EngineVersion: 14.7
+      MasterUsername: !Ref DBUser
+      MasterUserPassword: !Ref DBPassword
+      # db.t2.micro es elegible para el Free Tier
+      DBInstanceClass: db.t2.micro
+      AllocatedStorage: 20 # 20 GB de almacenamiento, dentro del Free Tier
+      StorageType: gp2
+      BackupRetentionPeriod: 0 # Deshabilita backups para reducir costos (NO para producción)
+      MultiAZ: false # Deshabilita Multi-AZ para reducir costos (NO para producción)
+      PubliclyAccessible: true # Permite acceso público para simplificar la conexión (NO para producción)
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      DBSubnetGroupName: !Ref RDSDBSubnetGroup
+      # Indica que es una instancia Free Tier
+      LicenseModel: postgresql-license
+
+Outputs:
+  DBEndpointAddress:
+    Description: The endpoint address of the RDS instance
+    Value: !GetAtt RDSInstance.Endpoint.Address
+  DBEndpointPort:
+    Description: The endpoint port of the RDS instance
+    Value: !GetAtt RDSInstance.Endpoint.Port
+  RDSSecurityGroupId:
+    Description: The Security Group ID for the RDS instance
+    Value: !Ref RDSSecurityGroup
