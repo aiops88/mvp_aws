@@ -21,6 +21,9 @@ Parameters:
   VpcId:
     Type: AWS::EC2::VPC::Id
     Description: The VPC ID where the RDS instance will be launched. (Use the default VPC ID)
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of subnet IDs for the RDS subnet group (private subnets recommended)
 
 Resources:
   # ============================================
@@ -30,8 +33,23 @@ Resources:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
       DBSubnetGroupDescription: Subnet group for RDS instance
-      SubnetIds: !Ref SubnetIds  # Se pasa como parámetro
+      SubnetIds: !Ref SubnetIds
       DBSubnetGroupName: !Sub "${DBInstanceIdentifier}-subnet-group"
+
+  # ============================================
+  # Security Group for RDS
+  # ============================================
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for RDS PostgreSQL instance
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          # Para pruebas se permite acceso público; en producción restringir a un CIDR o SG específico.
+          CidrIp: 0.0.0.0/0
 
   # ============================================
   # RDS Instance
@@ -42,7 +60,7 @@ Resources:
       DBInstanceIdentifier: !Ref DBInstanceIdentifier
       DBName: !Ref DBName
       Engine: postgres
-      EngineVersion: 14.7
+      EngineVersion: "14.7"
       MasterUsername: !Ref DBUser
       MasterUserPassword: !Ref DBPassword
       DBInstanceClass: db.t2.micro
