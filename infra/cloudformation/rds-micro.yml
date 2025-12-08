@@ -23,28 +23,19 @@ Parameters:
     Description: The VPC ID where the RDS instance will be launched. (Use the default VPC ID)
 
 Resources:
-  RDSSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for RDS instance
-      VpcId: !Ref VpcId
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 5432 # Default PostgreSQL port
-          ToPort: 5432
-          CidrIp: 0.0.0.0/0 # WARNING: For MVP testing only. Restrict this in production!
-
+  # ============================================
+  # RDS Subnet Group
+  # ============================================
   RDSDBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
       DBSubnetGroupDescription: Subnet group for RDS instance
-      SubnetIds:
-        # Busca las subnets de la VPC por defecto. Esto es un placeholder,
-        # en un entorno real deberías obtenerlas dinámicamente o pasarlas como parámetro.
-        # Asumiremos que la VPC por defecto tiene subnets.
-        - !Select [0, !GetAtt VpcId, Subnets]
-        - !Select [1, !GetAtt VpcId, Subnets]
+      SubnetIds: !Ref SubnetIds  # Se pasa como parámetro
+      DBSubnetGroupName: !Sub "${DBInstanceIdentifier}-subnet-group"
 
+  # ============================================
+  # RDS Instance
+  # ============================================
   RDSInstance:
     Type: AWS::RDS::DBInstance
     Properties:
@@ -54,17 +45,15 @@ Resources:
       EngineVersion: 14.7
       MasterUsername: !Ref DBUser
       MasterUserPassword: !Ref DBPassword
-      # db.t2.micro es elegible para el Free Tier
       DBInstanceClass: db.t2.micro
-      AllocatedStorage: 20 # 20 GB de almacenamiento, dentro del Free Tier
+      AllocatedStorage: 20
       StorageType: gp2
-      BackupRetentionPeriod: 0 # Deshabilita backups para reducir costos (NO para producción)
-      MultiAZ: false # Deshabilita Multi-AZ para reducir costos (NO para producción)
-      PubliclyAccessible: true # Permite acceso público para simplificar la conexión (NO para producción)
+      BackupRetentionPeriod: 0
+      MultiAZ: false
+      PubliclyAccessible: true
       VPCSecurityGroups:
         - !Ref RDSSecurityGroup
       DBSubnetGroupName: !Ref RDSDBSubnetGroup
-      # Indica que es una instancia Free Tier
       LicenseModel: postgresql-license
 
 Outputs:
