@@ -1,26 +1,26 @@
 [
   {
     "ParameterKey": "DBInstanceIdentifier",
-    "ParameterValue": "mvp-db-instance"
+    "ParameterValue": "festivos-api-db"
   },
   {
     "ParameterKey": "DBName",
-    "ParameterValue": "mvpdb"
+    "ParameterValue": "festivos"
   },
   {
     "ParameterKey": "DBUser",
-    "ParameterValue": "mvpuser"
+    "ParameterValue": "postgres"
   },
   {
     "ParameterKey": "DBPassword",
-    "ParameterValue": "123"
+    "ParameterValue": "festivos2024"
   },
   {
-    "ParameterKey": "AppRunnerServiceName",
-    "ParameterValue": "mvp-app-runner-service"
+    "ParameterKey": "ProjectName",
+    "ParameterValue": "festivos-api"
   },
   {
-    "ParameterKey": "S3BucketName",
-    "ParameterValue": "mvp-static-content-bucket-unique-name"
+    "ParameterKey": "Environment",
+    "ParameterValue": "prod"
   }
 ]
