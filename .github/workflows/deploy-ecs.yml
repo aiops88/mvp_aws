@@ -47,17 +47,17 @@ if ! aws cloudformation describe-stacks \
   done
 
   aws cloudformation deploy \
-    --stack-name ${PROJECT_NAME}-rds \
-    --template-file infra/cloudformation/rds-micro.yml \
-    --parameter-overrides \
-      DBInstanceIdentifier=${PROJECT_NAME}-db \
-      DBName=festivos \
-      DBUser=postgres \
-      DBPassword=festivos2024 \
-      VpcId=$VPC_ID \
-      $SUBNETS_OVERRIDE \
-    --capabilities CAPABILITY_NAMED_IAM \
-    --region $REGION
+  --stack-name ${PROJECT_NAME}-rds \
+  --template-file infra/cloudformation/rds-micro.yml \
+  --parameter-overrides \
+    DBInstanceIdentifier=${PROJECT_NAME}-db \
+    DBName=festivos \
+    DBUser=postgres \
+    DBPassword=festivos2024 \
+    VpcId=$VPC_ID \
+    SubnetIds=$(echo $SUBNET_IDS | sed 's/ / /g') \
+  --region $REGION
+
 
   aws cloudformation wait stack-create-complete \
     --stack-name ${PROJECT_NAME}-rds \
