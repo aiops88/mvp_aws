@@ -56,8 +56,8 @@ Resources:
   ECSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: !Sub ${ProjectName}-ecs-sg
-      GroupDescription: Permite tráfico HTTP para ECS tasks
+      GroupName: !Sub "${ProjectName}-ecs-sg"
+      GroupDescription: "Permite tráfico HTTP para ECS tasks"
       VpcId: !Ref VPCId
       SecurityGroupIngress:
         - IpProtocol: tcp
