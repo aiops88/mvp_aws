@@ -32,36 +32,44 @@ API REST en Spring Boot para consultar festivos por país y año, desplegada en 
 
 ## 🏗️ Arquitectura
 
+**Tipo**: Arquitectura de Microservicios Serverless
+
 ```
-┌─────────────┐
-│   Cliente   │
-└──────┬──────┘
-       │ HTTPS
-       ▼
-┌─────────────────────────────────────────┐
-│         ECS Fargate (Auto Scaling)      │
-│  ┌─────────────┐    ┌─────────────┐    │
-│  │  Task 1     │    │  Task 2     │    │
-│  │  Spring API │    │  Spring API │    │
-│  │  Port 8080  │    │  Port 8080  │    │
-│  └─────────────┘    └─────────────┘    │
-└────────────┬────────────────────────────┘
-             │
-             ▼
-    ┌────────────────┐
-    │  RDS PostgreSQL │
-    │   Multi-AZ      │
-    │   db.t3.micro   │
-    └────────────────┘
+                    ┌─────────────────┐
+                    │   Internet      │
+                    └────────┬────────┘
+                             │ HTTP
+                             ▼
+                    ┌─────────────────┐
+                    │  AWS CloudShell │
+                    │  (Despliegue)   │
+                    └─────────────────┘
+                             │
+        ┌────────────────────┼────────────────────┐
+        │                    │                    │
+        ▼                    ▼                    ▼
+┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+│ Amazon ECR   │    │  Amazon ECS  │    │  Amazon RDS  │
+│              │    │   Fargate    │    │  PostgreSQL  │
+│  - Backend   │───▶│              │───▶│              │
+│    Image     │    │ Spring Boot  │    │  Database    │
+│              │    │   :8080      │    │   :5432      │
+└──────────────┘    └──────────────┘    └──────────────┘
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │   CloudWatch    │
+                    │  Logs & Metrics │
+                    └─────────────────┘
 ```
 
 ### Componentes Principales
 
-1. **Amazon ECS Fargate**: Contenedores serverless con Spring Boot
-2. **Amazon RDS PostgreSQL**: Base de datos relacional Multi-AZ
-3. **Amazon ECR**: Registro privado de imágenes Docker
-4. **CloudWatch**: Logs centralizados y monitoreo
-5. **VPC por Defecto**: Red con subnets públicas para el MVP
+1. **Amazon ECR**: Repositorio privado de imágenes Docker
+2. **Amazon ECS Fargate**: Ejecución de contenedores Spring Boot (Serverless)
+3. **Amazon RDS PostgreSQL**: Base de datos relacional (db.t3.micro)
+4. **Amazon CloudWatch**: Monitoreo y logs centralizados
+5. **VPC Default**: Red con Security Groups para comunicación segura
 
 ---
 
@@ -132,29 +140,67 @@ Tu usuario AWS debe tener permisos para:
 
 ## 🚀 Despliegue en AWS
 
-### Opción 1: Despliegue Completo (Recomendado)
+### Opción 1: Despliegue Automático desde CloudShell (Recomendado)
+
+⚠️ **IMPORTANTE**: Este despliegue debe hacerse desde **AWS CloudShell**, NO desde tu máquina local.
 
 ```bash
-# 1. Clonar el repositorio
+# 1. Abrir AWS CloudShell
+# Ve a la consola de AWS → Ícono de terminal en la parte superior
+
+# 2. Clonar el repositorio en CloudShell
 git clone <repo-url>
 cd festivos-api
 
-# 2. Configurar permisos de ejecución
-chmod +x .github/workflows/deploy-ecs.yml
+# 3. Dar permisos de ejecución al script
+chmod +x scripts/deploy-all.sh
 
-# 3. Ejecutar despliegue completo
-bash .github/workflows/deploy-ecs.yml
+# 4. Ejecutar despliegue completo
+bash scripts/deploy-all.sh
 ```
 
 **⏱️ Tiempo estimado**: 15-20 minutos
 
-Este script ejecuta automáticamente:
-1. ✅ Configuración de red (VPC y subnets)
+**⚠️ LIMITACIONES DE CLOUDSHELL:**
+- CloudShell **NO tiene Docker** instalado
+- El script pausará en el paso de build/push de Docker
+- Deberás hacer el build de la imagen **localmente** o desde **CodeBuild**
+
+### Orden de Ejecución del Script:
+
+1. ✅ Obtención de VPC y subnets por defecto
 2. ✅ Creación de repositorio ECR
-3. ✅ Despliegue de base de datos RDS
-4. ✅ Creación de cluster ECS y servicio
-5. ✅ Build y push de imagen Docker
-6. ✅ Inicialización de base de datos
+3. ✅ Despliegue de base de datos RDS (espera 5-10 min)
+4. ✅ Despliegue de cluster ECS y servicio
+5. ⏸️ Build y push de Docker (REQUIERE MÁQUINA LOCAL - ver abajo)
+6. ✅ Inicialización de base de datos con datos iniciales
+7. ✅ Despliegue forzado del servicio ECS
+
+### Build de Docker (Ejecutar desde tu máquina local)
+
+```bash
+# En tu máquina local (con Docker instalado):
+
+# 1. Obtener URI del ECR desde CloudShell
+ECR_URI=$(aws cloudformation describe-stacks \
+  --stack-name festivos-api-ecr \
+  --query "Stacks[0].Outputs[?OutputKey=='ECRBackendUri'].OutputValue" \
+  --output text \
+  --region us-east-1)
+
+# 2. Login en ECR
+aws ecr get-login-password --region us-east-1 | \
+  docker login --username AWS --password-stdin ${ECR_URI%%/*}
+
+# 3. Build de imagen
+docker build -t festivos-api:latest -f apiFestivos/Dockerfile apiFestivos/
+
+# 4. Tag y push
+docker tag festivos-api:latest $ECR_URI:latest
+docker push $ECR_URI:latest
+
+# 5. Volver a CloudShell y continuar con el paso 6 del script
+```
 
 ---
 
@@ -247,10 +293,18 @@ echo "DB Endpoint: $DB_ENDPOINT"
 
 #### Paso 6: Inicializar Base de Datos
 
+⚠️ **MUY IMPORTANTE**: Este paso debe ejecutarse **DESPUÉS** de que RDS esté disponible y **ANTES** de desplegar ECS.
+
 ```bash
-# Instalar PostgreSQL client si no está instalado
-# Ubuntu/Debian: sudo apt-get install postgresql-client
-# MacOS: brew install postgresql
+# Ejecutar script de inicialización desde CloudShell
+bash scripts/init-database.sh
+```
+
+O manualmente:
+
+```bash
+# Instalar PostgreSQL client en CloudShell
+sudo yum install postgresql -y
 
 # Conectar y ejecutar script de inicialización
 PGPASSWORD=festivos2024 psql \
@@ -258,6 +312,13 @@ PGPASSWORD=festivos2024 psql \
   -U postgres \
   -d festivos \
   -f bd/init.sql
+
+# Verificar que las tablas se crearon
+PGPASSWORD=festivos2024 psql \
+  -h $DB_ENDPOINT \
+  -U postgres \
+  -d festivos \
+  -c "\dt"
 ```
 
 #### Paso 7: Desplegar ECS Fargate
@@ -592,8 +653,9 @@ Este proyecto está bajo la Licencia MIT. Ver archivo `LICENSE` para más detall
 
 ## 👥 Autor
 
-**Airy Nieves Cárdenas**
-**Diciembre 2025**
+**Airy Nieves Cárdenas**  
+📅 Diciembre 2025  
+📍 Colombia
 
 ---
 
@@ -614,4 +676,5 @@ Este proyecto está bajo la Licencia MIT. Ver archivo `LICENSE` para más detall
 
 ---
 
-**¿Preguntas o problemas?** Abre un issue en GitHub o contacta al equipo de desarrollo.
+**¿Preguntas o problemas?** Abre un issue en GitHub o contactame por mensaje acá.
+[Linkedin Airy Nieves](https://www.linkedin.com/in/airy-nc/)
