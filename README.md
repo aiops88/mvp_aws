@@ -138,69 +138,301 @@ Tu usuario AWS debe tener permisos para:
 
 ---
 
-## 🚀 Despliegue en AWS
+## 🚀 Despliegue en AWS - Guía Completa Paso a Paso
 
-### Opción 1: Despliegue Automático desde CloudShell (Recomendado)
+⚠️ **IMPORTANTE**: Este despliegue requiere **AWS CloudShell** (pasos 1 y 3) y tu **máquina local con Docker** (paso 2).
 
-⚠️ **IMPORTANTE**: Este despliegue debe hacerse desde **AWS CloudShell**, NO desde tu máquina local.
+**⏱️ Tiempo estimado total**: 20-25 minutos
+
+---
+
+### 📋 FASE 0: Preparación e Infraestructura (AWS CloudShell)
+
+#### Paso 1: Abrir AWS CloudShell
+
+1. Ir a la consola de AWS: https://console.aws.amazon.com
+2. Click en el ícono de terminal (🔲) en la barra superior derecha
+3. Esperar que CloudShell se inicialice (~30 segundos)
+
+#### Paso 2: Instalar PostgreSQL Client
 
 ```bash
-# 1. Abrir AWS CloudShell
-# Ve a la consola de AWS → Ícono de terminal en la parte superior
+sudo yum install postgresql -y
+```
 
-# 2. Clonar el repositorio en CloudShell
+#### Paso 3: Clonar el Repositorio
+
+```bash
 git clone <repo-url>
 cd festivos-api
+```
 
-# 3. Dar permisos de ejecución al script
+#### Paso 4: Ejecutar Script de Despliegue de Infraestructura
+
+```bash
 chmod +x scripts/deploy-all.sh
-
-# 4. Ejecutar despliegue completo
 bash scripts/deploy-all.sh
 ```
 
-**⏱️ Tiempo estimado**: 15-20 minutos
+**⏱️ Este paso tarda 15-20 minutos**
 
-**⚠️ LIMITACIONES DE CLOUDSHELL:**
-- CloudShell **NO tiene Docker** instalado
-- El script pausará en el paso de build/push de Docker
-- Deberás hacer el build de la imagen **localmente** o desde **CodeBuild**
+El script creará automáticamente:
+- ✅ Repositorio ECR (registro de imágenes Docker)
+- ✅ Base de datos RDS PostgreSQL (5-10 min esperando)
+- ✅ Cluster ECS y servicio Fargate
+- ✅ Security Groups, IAM Roles, CloudWatch Logs
 
-### Orden de Ejecución del Script:
+#### Paso 5: Copiar ECR URI
 
-1. ✅ Obtención de VPC y subnets por defecto
-2. ✅ Creación de repositorio ECR
-3. ✅ Despliegue de base de datos RDS (espera 5-10 min)
-4. ✅ Despliegue de cluster ECS y servicio
-5. ⏸️ Build y push de Docker (REQUIERE MÁQUINA LOCAL - ver abajo)
-6. ✅ Inicialización de base de datos con datos iniciales
-7. ✅ Despliegue forzado del servicio ECS
+Al finalizar el script, aparecerá un mensaje con el **ECR URI**:
 
-### Build de Docker (Ejecutar desde tu máquina local)
+```
+ECR URI: 123456789012.dkr.ecr.us-east-1.amazonaws.com/festivos-api-backend
+```
+
+**📋 COPIA ESTE VALOR** - lo necesitarás en el siguiente paso.
+
+---
+
+### 🐳 FASE 1: Build y Push de Imagen Docker (Tu Máquina Local)
+
+⚠️ **Requisito**: Tener Docker Desktop instalado y corriendo en tu máquina.
+
+#### Paso 1: Abrir Terminal en tu Máquina
 
 ```bash
-# En tu máquina local (con Docker instalado):
+# Windows (PowerShell o CMD)
+cd C:\Users\TU_USUARIO\Documents\festivos-api
 
-# 1. Obtener URI del ECR desde CloudShell
-ECR_URI=$(aws cloudformation describe-stacks \
-  --stack-name festivos-api-ecr \
-  --query "Stacks[0].Outputs[?OutputKey=='ECRBackendUri'].OutputValue" \
+# Linux/Mac
+cd ~/festivos-api
+```
+
+#### Paso 2: Autenticar Docker con AWS ECR
+
+Reemplaza `<ECR_URI>` con el valor que copiaste:
+
+```bash
+aws ecr get-login-password --region us-east-1 | \
+  docker login --username AWS --password-stdin <ECR_URI_SIN_/festivos-api-backend>
+
+# Ejemplo:
+# aws ecr get-login-password --region us-east-1 | \
+#   docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-east-1.amazonaws.com
+```
+
+**✅ Debe aparecer**: `Login Succeeded`
+
+#### Paso 3: Build de la Imagen Docker
+
+```bash
+docker build -t festivos-api:latest -f apiFestivos/Dockerfile apiFestivos/
+```
+
+**⏱️ Este paso tarda 3-5 minutos**
+
+#### Paso 4: Tag y Push de la Imagen
+
+Reemplaza `<ECR_URI>` con tu valor completo:
+
+```bash
+docker tag festivos-api:latest <ECR_URI>:latest
+docker push <ECR_URI>:latest
+
+# Ejemplo:
+# docker tag festivos-api:latest 123456789012.dkr.ecr.us-east-1.amazonaws.com/festivos-api-backend:latest
+# docker push 123456789012.dkr.ecr.us-east-1.amazonaws.com/festivos-api-backend:latest
+```
+
+**⏱️ Este paso tarda 2-3 minutos**
+
+**✅ Debe aparecer**: 
+```
+latest: digest: sha256:abc123... size: 1234
+```
+
+---
+
+### 🎯 FASE 2: Inicialización y Arranque (AWS CloudShell)
+
+Volver a AWS CloudShell.
+
+#### Paso 1: Inicializar Base de Datos
+
+```bash
+cd festivos-api
+bash scripts/init-database.sh
+```
+
+**✅ Debe aparecer**: `✅ Base de datos inicializada correctamente`
+
+Este script:
+- Crea las tablas (Tipo, Pais, Festivo)
+- Inserta datos iniciales (19 festivos de Colombia, 11 de Ecuador)
+- Configura secuencias de IDs
+
+#### Paso 2: Forzar Despliegue de ECS con Nueva Imagen
+
+```bash
+CLUSTER_NAME=$(aws cloudformation describe-stacks \
+  --stack-name festivos-api-ecs \
+  --query "Stacks[0].Outputs[?OutputKey=='ECSClusterName'].OutputValue" \
   --output text \
   --region us-east-1)
 
-# 2. Login en ECR
-aws ecr get-login-password --region us-east-1 | \
-  docker login --username AWS --password-stdin ${ECR_URI%%/*}
+SERVICE_NAME=$(aws cloudformation describe-stacks \
+  --stack-name festivos-api-ecs \
+  --query "Stacks[0].Outputs[?OutputKey=='ECSServiceName'].OutputValue" \
+  --output text \
+  --region us-east-1)
 
-# 3. Build de imagen
-docker build -t festivos-api:latest -f apiFestivos/Dockerfile apiFestivos/
-
-# 4. Tag y push
-docker tag festivos-api:latest $ECR_URI:latest
-docker push $ECR_URI:latest
-
-# 5. Volver a CloudShell y continuar con el paso 6 del script
+aws ecs update-service \
+  --cluster $CLUSTER_NAME \
+  --service $SERVICE_NAME \
+  --force-new-deployment \
+  --region us-east-1
 ```
+
+**⏱️ ECS tardará 2-3 minutos en desplegar la nueva tarea**
+
+#### Paso 3: Obtener IP Pública de la API
+
+```bash
+# Esperar 2 minutos a que la tarea esté corriendo
+sleep 120
+
+# Obtener ARN de la tarea
+TASK_ARN=$(aws ecs list-tasks \
+  --cluster $CLUSTER_NAME \
+  --service-name $SERVICE_NAME \
+  --region us-east-1 \
+  --query "taskArns[0]" \
+  --output text)
+
+# Obtener ENI ID
+ENI_ID=$(aws ecs describe-tasks \
+  --cluster $CLUSTER_NAME \
+  --tasks $TASK_ARN \
+  --region us-east-1 \
+  --query "tasks[0].attachments[0].details[?name=='networkInterfaceId'].value" \
+  --output text)
+
+# Obtener IP pública
+PUBLIC_IP=$(aws ec2 describe-network-interfaces \
+  --network-interface-ids $ENI_ID \
+  --region us-east-1 \
+  --query "NetworkInterfaces[0].Association.PublicIp" \
+  --output text)
+
+echo "🎉 ============================================"
+echo "🎉 API DESPLEGADA EXITOSAMENTE"
+echo "🎉 ============================================"
+echo "🌐 URL: http://$PUBLIC_IP:8080"
+echo "🏥 Health: http://$PUBLIC_IP:8080/actuator/health"
+echo "📚 Docs: http://$PUBLIC_IP:8080/swagger-ui.html"
+echo "🎉 ============================================"
+```
+
+---
+
+### ✅ Verificación del Despliegue
+
+#### Probar Health Check
+
+```bash
+curl http://$PUBLIC_IP:8080/actuator/health
+```
+
+**✅ Respuesta esperada**:
+```json
+{
+  "status": "UP",
+  "components": {
+    "db": {"status": "UP"},
+    "diskSpace": {"status": "UP"},
+    "ping": {"status": "UP"}
+  }
+}
+```
+
+#### Listar Festivos de Colombia 2024
+
+```bash
+curl http://$PUBLIC_IP:8080/api/festivos/listar/1/2024
+```
+
+**✅ Debe retornar**: Array JSON con 19 festivos
+
+---
+
+### 🔧 Troubleshooting
+
+#### Error: "Login Succeeded" no aparece en Docker
+
+```bash
+# Verificar credenciales AWS
+aws sts get-caller-identity
+
+# Si falla, reconfigurar AWS CLI
+aws configure
+```
+
+#### Error: "Base de datos no accesible" en init-database.sh
+
+```bash
+# Verificar que RDS esté disponible
+aws rds describe-db-instances \
+  --db-instance-identifier festivos-api-db \
+  --query "DBInstances[0].DBInstanceStatus" \
+  --region us-east-1
+
+# Debe mostrar: "available"
+```
+
+#### Error: ECS Task no arranca
+
+```bash
+# Ver logs de CloudWatch
+aws logs tail /ecs/festivos-api --follow --region us-east-1
+
+# Verificar eventos del servicio
+aws ecs describe-services \
+  --cluster $CLUSTER_NAME \
+  --services $SERVICE_NAME \
+  --region us-east-1 \
+  --query "services[0].events[0:5]"
+```
+
+---
+
+## 📝 Resumen del Flujo Completo
+
+```
+┌─────────────────────────────────────────────────────┐
+│ FASE 0: CloudShell                                  │
+│ ✅ Crear ECR + RDS + ECS (15-20 min)               │
+│ ✅ Copiar ECR URI                                   │
+└─────────────────────────────────────────────────────┘
+                      ⬇️
+┌─────────────────────────────────────────────────────┐
+│ FASE 1: Tu Máquina Local                            │
+│ ✅ Build imagen Docker (3-5 min)                   │
+│ ✅ Push a ECR (2-3 min)                            │
+└─────────────────────────────────────────────────────┘
+                      ⬇️
+┌─────────────────────────────────────────────────────┐
+│ FASE 2: CloudShell                                  │
+│ ✅ Inicializar DB (1 min)                          │
+│ ✅ Deploy ECS (2-3 min)                            │
+│ ✅ Obtener IP pública                              │
+└─────────────────────────────────────────────────────┘
+                      ⬇️
+              🎉 API FUNCIONANDO
+```
+
+**Total**: ~25-30 minutos
+
+---
 
 ---
 
@@ -676,5 +908,4 @@ Este proyecto está bajo la Licencia MIT. Ver archivo `LICENSE` para más detall
 
 ---
 
-**¿Preguntas o problemas?** Abre un issue en GitHub o contactame por mensaje acá.
-[Linkedin Airy Nieves](https://www.linkedin.com/in/airy-nc/)
+**¿Preguntas o problemas?** Abre un issue en GitHub o contacta al equipo de desarrollo.
