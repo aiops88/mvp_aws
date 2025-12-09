@@ -35,6 +35,7 @@
         <module>presentacion</module>
     </modules>
 	<properties>
+		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<java.version>17</java.version>
 		<sonar.organization>festivos</sonar.organization>
 		<sonar.host.url>http://localhost:9000</sonar.host.url>
@@ -132,15 +133,12 @@
 			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-surefire-plugin</artifactId>
-				<version>3.0.0-M9</version>
+				<artifactId>maven-resources-plugin</artifactId>
+				<version>3.3.1</version>
 				<configuration>
-					<includes>
-						<include>**/*Test.java</include>
-						<include>**/*Tests.java</include>
-					</includes>
-				</configuration>
-			</plugin>
+                	<encoding>UTF-8</encoding>
+            </configuration>
+        	</plugin>
 		</plugins>
 	</build>
 
