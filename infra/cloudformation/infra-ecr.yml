@@ -1,25 +1,24 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: >-
-  ECR repositories, ECS Cluster (EC2 launch), IAM roles, Launch Configuration and AutoScalingGroup
-  for ProyectoFestivos. Instances will join the ECS cluster via UserData.
+Description: ECR repositories for ProyectoFestivos
 
 Parameters:
   ProjectName:
     Type: String
+    Default: festivos-api
   Environment:
     Type: String
     Default: staging
-  ECRRepoBackend:
-    Type: String
-  ECRRepoFrontend:
-    Type: String
+  #ECRRepoBackend:
+  #  Type: String
+  #ECRRepoFrontend:
+  #  Type: String
 
 Resources:
   # ECR repos
   ECRBackend:
     Type: AWS::ECR::Repository
     Properties:
-      RepositoryName: !Ref ECRRepoBackend
+      RepositoryName: !Sub "${ProjectName}-backend" #!Ref ECRRepoBackend
       LifecyclePolicy:
         LifecyclePolicyText:
           Fn::Sub: |
@@ -32,7 +31,7 @@ Resources:
   ECRFrontend:
     Type: AWS::ECR::Repository
     Properties:
-      RepositoryName: !Ref ECRRepoFrontend
+      RepositoryName: !Sub "${ProjectName}-frontend" #!Ref ECRRepoFrontend
       LifecyclePolicy:
         LifecyclePolicyText:
           Fn::Sub: |
@@ -44,11 +43,17 @@ Resources:
 
 Outputs:
   ECRBackendUri:
-    Description: ECR repository URI for backend
-    Value: !GetAtt [ECRBackend, RepositoryUri]
+    Description: URI del repositorio ECR backend
+    Value:
+      Fn::GetAtt: [ECRBackend, RepositoryUri]
     Export:
-        Name: !Sub "${ProjectName}-ecr-backend-uri"
-    
+      Name:
+        Fn::Sub: "${ProjectName}-ecr-backend-uri"
   ECRFrontendUri:
-    Description: ECR repository URI for frontend
-    Value: !GetAtt [ECRFrontend, RepositoryUri]
+    Description: URI del repositorio ECR frontend
+    Value:
+      Fn::GetAtt: [ECRFrontend, RepositoryUri]
+    Export:
+      Name:
+        Fn::Sub: "${ProjectName}-ecr-frontend-uri"
+        Fn::Sub "${ProjectName}-ecr-frontend-uri"

@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Infraestructura simplificada ECS Fargate para API Festivos
+Description: ECS Fargate infra for ProyectoFestivos API
 
 Parameters:
   ProjectName:
@@ -10,7 +10,7 @@ Parameters:
     Default: prod
   VPCId:
     Type: AWS::EC2::VPC::Id
-    Description: VPC donde desplegar (usar VPC por defecto)
+    Description: VPC donde desplegar
   SubnetIds:
     Type: CommaDelimitedList
     Description: Lista de Subnet IDs separados por comas
@@ -27,55 +27,19 @@ Parameters:
     Type: String
     NoEcho: true
 
+# Import ECR URIs
+Mappings:
+  ECRUris:
+    Backend: !ImportValue "festivos-api-ecr-backend-uri"
+
 Resources:
   # ============================================
-  # 1. ECR Repository (Almacén de imágenes Docker)
-  # ============================================
-  ECRRepository:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryName: !Sub ${ProjectName}-backend
-      LifecyclePolicy:
-        LifecyclePolicyText: |
-          {
-            "rules": [{
-              "rulePriority": 1,
-              "description": "Mantener últimas 5 imágenes",
-              "selection": {
-                "tagStatus": "any",
-                "countType": "imageCountMoreThan",
-                "countNumber": 5
-              },
-              "action": {"type": "expire"}
-            }]
-          }
-
-  # ============================================
-  # 2. Security Groups
-  # ============================================
-  ECSSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupName: !Sub ${ProjectName}-ecs-sg
-      GroupDescription: Permite trafico HTTP para ECS tasks   # <-- quitar acentos
-      VpcId: !Ref VPCId
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 8080
-          ToPort: 8080
-          CidrIp: 0.0.0.0/0
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          CidrIp: 0.0.0.0/0
-
-
-  # ============================================
-  # 3. IAM Roles
+  # IAM Roles
   # ============================================
   ECSTaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub ${ProjectName}-ecs-execution-role
+      RoleName: !Sub "${ProjectName}-ecs-execution-role"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -101,7 +65,7 @@ Resources:
   ECSTaskRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub ${ProjectName}-ecs-task-role
+      RoleName: !Sub "${ProjectName}-ecs-task-role"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -111,29 +75,47 @@ Resources:
             Action: sts:AssumeRole
 
   # ============================================
-  # 4. CloudWatch Logs
+  # Security Group
+  # ============================================
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName}-ecs-sg"
+      GroupDescription: Permite trafico HTTP para ECS tasks
+      VpcId: !Ref VPCId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  # ============================================
+  # CloudWatch Logs
   # ============================================
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub /ecs/${ProjectName}
+      LogGroupName: !Sub "/ecs/${ProjectName}"
       RetentionInDays: 7
 
   # ============================================
-  # 5. ECS Cluster
+  # ECS Cluster
   # ============================================
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties:
-      ClusterName: !Sub ${ProjectName}-cluster
+      ClusterName: !Sub "${ProjectName}-cluster"
 
   # ============================================
-  # 6. Task Definition
+  # Task Definition
   # ============================================
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Family: !Sub ${ProjectName}-task
+      Family: !Sub "${ProjectName}-task"
       RequiresCompatibilities:
         - FARGATE
       NetworkMode: awsvpc
@@ -142,8 +124,8 @@ Resources:
       ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
       TaskRoleArn: !GetAtt ECSTaskRole.Arn
       ContainerDefinitions:
-        - Name: !Sub ${ProjectName}-container
-          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepository}:latest
+        - Name: !Sub "${ProjectName}-container"
+          Image: !ImportValue "${ProjectName}-ecr-backend-uri":latest
           PortMappings:
             - ContainerPort: 8080
               Protocol: tcp
@@ -151,7 +133,7 @@ Resources:
             - Name: SPRING_PROFILES_ACTIVE
               Value: docker
             - Name: SPRING_DATASOURCE_URL
-              Value: !Sub jdbc:postgresql://${DBEndpoint}:5432/${DBName}
+              Value: !Sub "jdbc:postgresql://${DBEndpoint}:5432/${DBName}"
             - Name: SPRING_DATASOURCE_USERNAME
               Value: !Ref DBUser
             - Name: SPRING_DATASOURCE_PASSWORD
@@ -172,12 +154,12 @@ Resources:
             StartPeriod: 60
 
   # ============================================
-  # 7. ECS Service
+  # ECS Service
   # ============================================
   ECSService:
     Type: AWS::ECS::Service
     Properties:
-      ServiceName: !Sub ${ProjectName}-service
+      ServiceName: !Sub "${ProjectName}-service"
       Cluster: !Ref ECSCluster
       TaskDefinition: !Ref TaskDefinition
       DesiredCount: 1
@@ -191,20 +173,14 @@ Resources:
       HealthCheckGracePeriodSeconds: 60
 
 Outputs:
-  ECRRepositoryUri:
-    Description: URI del repositorio ECR
-    Value: !GetAtt ECRRepository.RepositoryUri
-    Export:
-      Name: !Sub ${ProjectName}-ecr-uri
-  
   ECSClusterName:
     Description: Nombre del cluster ECS
     Value: !Ref ECSCluster
     Export:
-      Name: !Sub ${ProjectName}-cluster-name
-  
+      Name: !Sub "${ProjectName}-cluster-name"
+
   ECSServiceName:
     Description: Nombre del servicio ECS
     Value: !GetAtt ECSService.Name
     Export:
-      Name: !Sub ${ProjectName}-service-name
+      Name: !Sub "${ProjectName}-service-name"
