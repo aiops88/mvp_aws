@@ -27,10 +27,7 @@ Parameters:
     Type: String
     NoEcho: true
 
-# Import ECR URIs
-Mappings:
-  ECRUris:
-    Backend: !ImportValue "festivos-api-ecr-backend-uri"
+
 
 Resources:
   # ============================================
@@ -142,7 +139,7 @@ Resources:
             LogDriver: awslogs
             Options:
               awslogs-group: !Ref LogGroup
-              awslogs-region: !Ref AWS::Region
+              awslogs-region: !Ref "AWS::Region"
               awslogs-stream-prefix: ecs
           HealthCheck:
             Command:
