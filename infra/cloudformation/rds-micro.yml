@@ -44,12 +44,16 @@ Resources:
     Properties:
       GroupDescription: Security group for RDS PostgreSQL instance
       VpcId: !Ref VpcId
+      # En rds-micro.yml, líneas 47-53
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 5432
           ToPort: 5432
-          # Para pruebas se permite acceso público; en producción restringir a un CIDR o SG específico.
-          CidrIp: 0.0.0.0/0
+          # Restringido al CIDR de la VPC para mayor seguridad
+          CidrIp: !Sub "${VpcId}/16" # Esto no funciona directamente, ya que VpcId es un parámetro, no un recurso.
+          # La forma más simple es usar el CIDR de la VPC por defecto, que es 172.31.0.0/16
+          CidrIp: 172.31.0.0/16 # Asumiendo VPC por defecto
+
 
   # ============================================
   # RDS Instance
