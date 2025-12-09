@@ -60,7 +60,7 @@ Resources:
       DBInstanceIdentifier: !Ref DBInstanceIdentifier
       DBName: !Ref DBName
       Engine: postgres
-      EngineVersion: "14.7"
+      EngineVersion: "14.17"
       MasterUsername: !Ref DBUser
       MasterUserPassword: !Ref DBPassword
       DBInstanceClass: db.t3.micro
