@@ -125,7 +125,7 @@ Resources:
       TaskRoleArn: !GetAtt ECSTaskRole.Arn
       ContainerDefinitions:
         - Name: !Sub "${ProjectName}-container"
-          Image: !ImportValue "${ProjectName}-ecr-backend-uri":latest
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ProjectName}-backend:latest"
           PortMappings:
             - ContainerPort: 8080
               Protocol: tcp

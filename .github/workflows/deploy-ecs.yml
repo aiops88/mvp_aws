@@ -7,9 +7,8 @@ REGION="us-east-1"
 echo "Desplegando infraestructura ECS para $PROJECT_NAME"
 
 # ============================================
-# 1. Obtener VPC y Subnets por defecto
+# 1. Obtener VPC y subnets por defecto
 # ============================================
-echo "Obteniendo información de red..."
 VPC_ID=$(aws ec2 describe-vpcs \
   --filters Name=is-default,Values=true \
   --query "Vpcs[0].VpcId" \
@@ -17,36 +16,34 @@ VPC_ID=$(aws ec2 describe-vpcs \
   --region $REGION)
 
 SUBNET_IDS=$(aws ec2 describe-subnets \
-  --filters Name=vpc-id,Values=$VPC_ID \
+  --filters "Name=vpc-id,Values=$VPC_ID" "Name=map-public-ip-on-launch,Values=true" \
   --query "Subnets[*].SubnetId" \
   --output text \
-  --region $REGION)
-
-if [ -z "$VPC_ID" ] || [ -z "$SUBNET_IDS" ]; then
-  echo "Error: No se pudo obtener VPC o Subnets."
-  exit 1
-fi
+  --region $REGION | tr '\t' ',')
 
 echo "VPC: $VPC_ID"
-echo "Subnets: $SUBNET_IDS"
+echo "Subnets seleccionadas: $SUBNET_IDS"
 
 # ============================================
-# 2. Desplegar RDS (si no existe)
+# 2. Función para eliminar stack si existe
 # ============================================
-echo "Verificando base de datos..."
-if ! aws cloudformation describe-stacks \
-  --stack-name ${PROJECT_NAME}-rds \
-  --region $REGION &>/dev/null; then
+delete_stack_if_exists() {
+  local stack_name=$1
+  if aws cloudformation describe-stacks --stack-name "$stack_name" --region $REGION &>/dev/null; then
+    echo "Eliminando stack existente: $stack_name"
+    aws cloudformation delete-stack --stack-name "$stack_name" --region $REGION
+    aws cloudformation wait stack-delete-complete --stack-name "$stack_name" --region $REGION
+    echo "Stack $stack_name eliminado"
+  fi
+}
 
-  echo "Creando base de datos RDS..."
-  
-  # Convertir SUBNET_IDS a formato compatible
-  SUBNETS_OVERRIDE=""
-  for subnet in $SUBNET_IDS; do
-    SUBNETS_OVERRIDE+="SubnetIds=$subnet "
-  done
+# ============================================
+# 3. Desplegar RDS
+# ============================================
+delete_stack_if_exists "${PROJECT_NAME}-rds"
 
-  aws cloudformation deploy \
+echo "Creando base de datos RDS..."
+aws cloudformation deploy \
   --stack-name ${PROJECT_NAME}-rds \
   --template-file infra/cloudformation/rds-micro.yml \
   --parameter-overrides \
@@ -55,14 +52,13 @@ if ! aws cloudformation describe-stacks \
     DBUser=postgres \
     DBPassword=festivos2024 \
     VpcId=$VPC_ID \
-    SubnetIds=$(echo $SUBNET_IDS | sed 's/ / /g') \
+    SubnetIds=$SUBNET_IDS \
+  --capabilities CAPABILITY_NAMED_IAM \
   --region $REGION
 
-
-  aws cloudformation wait stack-create-complete \
-    --stack-name ${PROJECT_NAME}-rds \
-    --region $REGION
-fi
+aws cloudformation wait stack-create-complete \
+  --stack-name ${PROJECT_NAME}-rds \
+  --region $REGION
 
 DB_ENDPOINT=$(aws cloudformation describe-stacks \
   --stack-name ${PROJECT_NAME}-rds \
@@ -70,12 +66,32 @@ DB_ENDPOINT=$(aws cloudformation describe-stacks \
   --output text \
   --region $REGION)
 
-echo "Base de datos lista: $DB_ENDPOINT"
+# ============================================
+# ============================================
+# 4. Desplegar ECR
+# ============================================
+delete_stack_if_exists "${PROJECT_NAME}-ecr"
+
+echo "Creando ECR Repository..."
+aws cloudformation deploy \
+  --stack-name ${PROJECT_NAME}-ecr \
+  --template-file infra/cloudformation/infra-ecr.yml \
+  --parameter-overrides \
+    ProjectName=$PROJECT_NAME \
+  --region $REGION
+
+ECR_URI=$(aws cloudformation describe-stacks \
+  --stack-name ${PROJECT_NAME}-ecr \
+  --query "Stacks[0].Outputs[?OutputKey=='ECRBackendUri'].OutputValue" \
+  --output text \
+  --region $REGION)
 
 # ============================================
-# 3. Desplegar ECS + ECR
+# 5. Desplegar ECS
 # ============================================
-echo "Desplegando infraestructura ECS..."
+delete_stack_if_exists "${PROJECT_NAME}-ecs"
+
+echo "Creando ECS Cluster y Service..."
 aws cloudformation deploy \
   --stack-name ${PROJECT_NAME}-ecs \
   --template-file infra/cloudformation/infra-ecs-simplified.yml \
@@ -95,20 +111,8 @@ aws cloudformation wait stack-create-complete \
   --region $REGION
 
 # ============================================
-# 4. Build y Push de imagen Docker
+# 6. Build y Push Docker
 # ============================================
-ECR_URI=$(aws cloudformation describe-stacks \
-  --stack-name ${PROJECT_NAME}-ecs \
-  --query "Stacks[0].Outputs[?OutputKey=='ECRRepositoryUri'].OutputValue" \
-  --output text \
-  --region $REGION)
-
-if [ -z "$ECR_URI" ]; then
-  echo "Error: No se pudo obtener ECR URI desde el stack ECS."
-  exit 1
-fi
-
-echo "ECR URI: $ECR_URI"
 
 aws ecr get-login-password --region $REGION | \
   docker login --username AWS --password-stdin ${ECR_URI%%/*}
@@ -117,10 +121,8 @@ docker build -t $PROJECT_NAME:latest -f apiFestivos/Dockerfile apiFestivos/
 docker tag $PROJECT_NAME:latest $ECR_URI:latest
 docker push $ECR_URI:latest
 
-echo "Imagen subida: $ECR_URI:latest"
-
 # ============================================
-# 5. Forzar nuevo despliegue del servicio ECS
+# 7. Forzar despliegue ECS
 # ============================================
 CLUSTER_NAME=$(aws cloudformation describe-stacks \
   --stack-name ${PROJECT_NAME}-ecs \
@@ -140,6 +142,4 @@ aws ecs update-service \
   --force-new-deployment \
   --region $REGION
 
-echo "Despliegue completado."
-echo "Para ver logs: aws logs tail /ecs/$PROJECT_NAME --follow --region $REGION"
-echo "Para obtener IP pública de la tarea: aws ecs list-tasks --cluster $CLUSTER_NAME --service $SERVICE_NAME --region $REGION"
+echo "Despliegue completado correctamente"

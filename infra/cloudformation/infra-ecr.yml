@@ -56,4 +56,3 @@ Outputs:
     Export:
       Name:
         Fn::Sub: "${ProjectName}-ecr-frontend-uri"
-        Fn::Sub "${ProjectName}-ecr-frontend-uri"
